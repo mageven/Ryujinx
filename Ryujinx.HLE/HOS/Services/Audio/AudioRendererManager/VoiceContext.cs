@@ -6,6 +6,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 {
     class VoiceContext
     {
+        public int VoiceSlot { get; set; }
         private bool _acquired;
         private bool _bufferReload;
 

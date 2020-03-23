@@ -40,6 +40,8 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
         private PlayState _playState;
 
+        public VoiceChannelResourceIn[] _channelState;
+
         public IAudioRenderer(
             Horizon                system,
             MemoryManager          memory,
@@ -171,7 +173,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
                 }
             }
 
-            reader.Read<VoiceChannelResourceIn>(inputHeader.VoiceResourceSize);
+            _channelState = reader.Read<VoiceChannelResourceIn>(inputHeader.VoiceResourceSize);
 
             VoiceIn[] voicesIn = reader.Read<VoiceIn>(inputHeader.VoiceSize);
 
@@ -187,6 +189,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
                 {
                     continue;
                 }
+                voiceCtx.VoiceSlot = voice.VoiceSlot;
 
                 if (voice.FirstUpdate != 0)
                 {
@@ -360,7 +363,14 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
                     for (int offset = 0; offset < samples.Length; offset++)
                     {
-                        mixBuffer[outOffset++] += (int)(samples[offset] * voice.Volume);
+                        if (offset % 2 == 0)
+                        {
+                            mixBuffer[outOffset++] += (int)(samples[offset] * voice.Volume * _channelState[voice.VoiceSlot].mix_volume.vol1);
+                        }
+                        else
+                        {
+                            mixBuffer[outOffset++] += (int)(samples[offset] * voice.Volume * _channelState[voice.VoiceSlot].mix_volume.vol2);
+                        }
                     }
                 }
             }
