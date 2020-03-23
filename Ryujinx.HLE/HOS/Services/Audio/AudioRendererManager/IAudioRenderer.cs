@@ -363,7 +363,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
                     for (int offset = 0; offset < samples.Length; offset++)
                     {
-                        if (offset % 2 == 0)
+                        if (offset % 2 == 0 || voice.ChannelsCount == 1)
                         {
                             mixBuffer[outOffset++] += (int)(samples[offset] * voice.Volume * _channelState[voice.VoiceSlot].mix_volume.vol1);
                         }
