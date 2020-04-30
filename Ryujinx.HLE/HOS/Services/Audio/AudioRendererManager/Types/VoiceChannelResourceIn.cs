@@ -7,6 +7,6 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
     {
         public int id;
         public MixVolume mix_volume;
-        bool is_used;
+        public bool is_used;
     }
 }

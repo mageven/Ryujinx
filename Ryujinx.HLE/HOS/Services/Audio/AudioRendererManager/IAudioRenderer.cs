@@ -381,13 +381,21 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
                     for (int offset = 0; offset < samples.Length; offset++)
                     {
-                        if (offset % 2 == 0 || voice.ChannelsCount == 1)
+                        float sampleL = samples[offset] * voice.Volume;
+                        float sampleR = samples[offset] * voice.Volume;
+                        if (_channelState[voice.VoiceSlot].is_used)
                         {
-                            mixBuffer[outOffset++] += (int)(samples[offset] * voice.Volume * _channelState[voice.VoiceSlot].mix_volume.vol1);
+                            sampleL *= _channelState[voice.VoiceSlot].mix_volume.vol1;
+                            sampleR *= _channelState[voice.VoiceSlot].mix_volume.vol2;
+                        }
+
+                        if (outOffset % 2 == 0 || voice.ChannelsCount == 1)
+                        {
+                            mixBuffer[outOffset++] += (int)sampleL;
                         }
                         else
                         {
-                            mixBuffer[outOffset++] += (int)(samples[offset] * voice.Volume * _channelState[voice.VoiceSlot].mix_volume.vol2);
+                            mixBuffer[outOffset++] += (int)sampleR;
                         }
                     }
                 }
