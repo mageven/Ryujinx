@@ -7,8 +7,8 @@ using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.FileSystem.Content;
 using Ryujinx.HLE.HOS;
 using Ryujinx.HLE.HOS.Services;
+using Ryujinx.HLE.HOS.Services.Hid;
 using Ryujinx.HLE.HOS.SystemState;
-using Ryujinx.HLE.Input;
 using System;
 using System.Threading;
 
@@ -31,10 +31,6 @@ namespace Ryujinx.HLE
         public Hid Hid { get; private set; }
 
         public bool EnableDeviceVsync { get; set; } = true;
-
-        public AutoResetEvent VsyncEvent { get; private set; }
-
-        public event EventHandler Finish;
 
         public Switch(VirtualFileSystem fileSystem, ContentManager contentManager, IRenderer renderer, IAalOutput audioOut)
         {
@@ -61,8 +57,7 @@ namespace Ryujinx.HLE
             Statistics = new PerformanceStatistics();
 
             Hid = new Hid(this, System.HidBaseAddress);
-
-            VsyncEvent = new AutoResetEvent(true);
+            Hid.InitDevices();
         }
 
         public void Initialize()
@@ -73,7 +68,6 @@ namespace Ryujinx.HLE
 
             EnableDeviceVsync = ConfigurationState.Instance.Graphics.EnableVsync;
 
-            // TODO: Make this reloadable and implement Docking/Undocking logic.
             System.State.DockedMode = ConfigurationState.Instance.System.EnableDockedMode;
 
             if (ConfigurationState.Instance.System.EnableMulticoreScheduling)
@@ -157,7 +151,6 @@ namespace Ryujinx.HLE
             if (disposing)
             {
                 System.Dispose();
-                VsyncEvent.Dispose();
                 AudioOut.Dispose();
             }
         }

@@ -81,6 +81,7 @@ namespace Ryujinx.Debugger.UI
 
         private SkRenderer _renderer;
 
+#pragma warning disable CS0649
         [GUI] ScrolledWindow _scrollview;
         [GUI] CheckButton    _enableCheckbutton;
         [GUI] Scrollbar      _outputScrollbar;
@@ -90,6 +91,7 @@ namespace Ryujinx.Debugger.UI
         [GUI] CheckButton    _showInactive;
         [GUI] Button         _stepButton;
         [GUI] CheckButton    _pauseCheckbutton;
+#pragma warning restore CS0649
 
         public ProfilerWidget() : this(new Builder("Ryujinx.Debugger.UI.ProfilerWidget.glade")) { }
 
@@ -287,7 +289,7 @@ namespace Ryujinx.Debugger.UI
                                 _sortedProfileData = _sortedProfileData.Where((pair => filterRegex.IsMatch(pair.Key.Search))).ToList();
                             }
                         }
-                        catch (ArgumentException argException)
+                        catch (ArgumentException)
                         {
                             // Skip filtering for invalid regex
                         }
@@ -481,7 +483,7 @@ namespace Ryujinx.Debugger.UI
 
                     float y = GetLineY(yOffset, LineHeight, LinePadding, true, verticalIndex);
 
-                    canvas.DrawText(entry.Key.SessionGroup, new SKPoint(xOffset, y), textFont);
+                    canvas.DrawText(entry.Key.SessionItem, new SKPoint(xOffset, y), textFont);
 
                     columnWidth = textFont.MeasureText(entry.Key.SessionItem);
 

@@ -2,6 +2,7 @@
 using Ryujinx.Configuration;
 using Ryujinx.Configuration.Hid;
 using Ryujinx.Configuration.System;
+using Ryujinx.HLE.HOS.Services.Time.TimeZone;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -18,6 +19,8 @@ namespace Ryujinx.Ui
         private static ListStore _gameDirsBoxStore;
 
         private static bool _listeningForKeypress;
+
+        private long _systemTimeOffset;
 
 #pragma warning disable CS0649
 #pragma warning disable IDE0044
@@ -40,6 +43,17 @@ namespace Ryujinx.Ui
         [GUI] CheckButton  _directKeyboardAccess;
         [GUI] ComboBoxText _systemLanguageSelect;
         [GUI] ComboBoxText _systemRegionSelect;
+        [GUI] ComboBoxText _systemTimeZoneSelect;
+        [GUI] SpinButton   _systemTimeYearSpin;
+        [GUI] SpinButton   _systemTimeMonthSpin;
+        [GUI] SpinButton   _systemTimeDaySpin;
+        [GUI] SpinButton   _systemTimeHourSpin;
+        [GUI] SpinButton   _systemTimeMinuteSpin;
+        [GUI] Adjustment   _systemTimeYearSpinAdjustment;
+        [GUI] Adjustment   _systemTimeMonthSpinAdjustment;
+        [GUI] Adjustment   _systemTimeDaySpinAdjustment;
+        [GUI] Adjustment   _systemTimeHourSpinAdjustment;
+        [GUI] Adjustment   _systemTimeMinuteSpinAdjustment;
         [GUI] CheckButton  _custThemeToggle;
         [GUI] Entry        _custThemePath;
         [GUI] ToggleButton _browseThemePath;
@@ -50,6 +64,7 @@ namespace Ryujinx.Ui
         [GUI] ToggleButton _browseDir;
         [GUI] ToggleButton _removeDir;
         [GUI] Entry        _graphicsShadersDumpPath;
+        [GUI] ComboBoxText _anisotropy;
         [GUI] Image        _controller1Image;
 
         [GUI] ComboBoxText _controller1Type;
@@ -80,9 +95,9 @@ namespace Ryujinx.Ui
 #pragma warning restore CS0649
 #pragma warning restore IDE0044
 
-        public SwitchSettings() : this(new Builder("Ryujinx.Ui.SwitchSettings.glade")) { }
+        public SwitchSettings(HLE.FileSystem.VirtualFileSystem virtualFileSystem, HLE.FileSystem.Content.ContentManager contentManager) : this(new Builder("Ryujinx.Ui.SwitchSettings.glade"), virtualFileSystem, contentManager) { }
 
-        private SwitchSettings(Builder builder) : base(builder.GetObject("_settingsWin").Handle)
+        private SwitchSettings(Builder builder, HLE.FileSystem.VirtualFileSystem virtualFileSystem, HLE.FileSystem.Content.ContentManager contentManager) : base(builder.GetObject("_settingsWin").Handle)
         {
             builder.Autoconnect(this);
 
@@ -197,8 +212,23 @@ namespace Ryujinx.Ui
                 _custThemeToggle.Click();
             }
 
+            TimeZoneContentManager timeZoneContentManager = new TimeZoneContentManager();
+
+            timeZoneContentManager.InitializeInstance(virtualFileSystem, contentManager, LibHac.FsSystem.IntegrityCheckLevel.None);
+
+            List<string> locationNames = timeZoneContentManager.LocationNameCache.ToList();
+
+            locationNames.Sort();
+
+            foreach (string locationName in locationNames)
+            {
+                _systemTimeZoneSelect.Append(locationName, locationName);
+            }
+
             _systemLanguageSelect.SetActiveId(ConfigurationState.Instance.System.Language.Value.ToString());
             _systemRegionSelect  .SetActiveId(ConfigurationState.Instance.System.Region.Value.ToString());
+            _systemTimeZoneSelect.SetActiveId(timeZoneContentManager.SanityCheckDeviceLocationName());
+            _anisotropy          .SetActiveId(ConfigurationState.Instance.Graphics.MaxAnisotropy.Value.ToString());
             _controller1Type     .SetActiveId(ConfigurationState.Instance.Hid.ControllerType.Value.ToString());
             Controller_Changed(null, null, _controller1Type.ActiveId, _controller1Image);
 
@@ -230,6 +260,7 @@ namespace Ryujinx.Ui
             _custThemePath.Buffer.Text           = ConfigurationState.Instance.Ui.CustomThemePath;
             _graphicsShadersDumpPath.Buffer.Text = ConfigurationState.Instance.Graphics.ShadersDumpPath;
             _fsLogSpinAdjustment.Value           = ConfigurationState.Instance.System.FsGlobalAccessLogMode;
+            _systemTimeOffset                    = ConfigurationState.Instance.System.SystemTimeOffset;
 
             _gameDirsBox.AppendColumn("", new CellRendererText(), "text", 0);
             _gameDirsBoxStore  = new ListStore(typeof(string));
@@ -248,9 +279,71 @@ namespace Ryujinx.Ui
             }
 
             _listeningForKeypress = false;
+
+            //Setup system time spinners
+            UpdateSystemTimeSpinners();
+        }
+
+        private void UpdateSystemTimeSpinners()
+        {
+            //Unbind system time spin events
+            _systemTimeYearSpin.ValueChanged   -= SystemTimeSpin_ValueChanged;
+            _systemTimeMonthSpin.ValueChanged  -= SystemTimeSpin_ValueChanged;
+            _systemTimeDaySpin.ValueChanged    -= SystemTimeSpin_ValueChanged;
+            _systemTimeHourSpin.ValueChanged   -= SystemTimeSpin_ValueChanged;
+            _systemTimeMinuteSpin.ValueChanged -= SystemTimeSpin_ValueChanged;
+
+            //Apply actual system time + SystemTimeOffset to system time spin buttons
+            DateTime systemTime = DateTime.Now.AddSeconds(_systemTimeOffset);
+
+            _systemTimeYearSpinAdjustment.Value   = systemTime.Year;
+            _systemTimeMonthSpinAdjustment.Value  = systemTime.Month;
+            _systemTimeDaySpinAdjustment.Value    = systemTime.Day;
+            _systemTimeHourSpinAdjustment.Value   = systemTime.Hour;
+            _systemTimeMinuteSpinAdjustment.Value = systemTime.Minute;
+
+            //Format spin buttons text to include leading zeros
+            _systemTimeYearSpin.Text   = systemTime.Year.ToString("0000");
+            _systemTimeMonthSpin.Text  = systemTime.Month.ToString("00");
+            _systemTimeDaySpin.Text    = systemTime.Day.ToString("00");
+            _systemTimeHourSpin.Text   = systemTime.Hour.ToString("00");
+            _systemTimeMinuteSpin.Text = systemTime.Minute.ToString("00");
+
+            //Bind system time spin button events
+            _systemTimeYearSpin.ValueChanged   += SystemTimeSpin_ValueChanged;
+            _systemTimeMonthSpin.ValueChanged  += SystemTimeSpin_ValueChanged;
+            _systemTimeDaySpin.ValueChanged    += SystemTimeSpin_ValueChanged;
+            _systemTimeHourSpin.ValueChanged   += SystemTimeSpin_ValueChanged;
+            _systemTimeMinuteSpin.ValueChanged += SystemTimeSpin_ValueChanged;
         }
 
         //Events
+        private void SystemTimeSpin_ValueChanged(Object sender, EventArgs e)
+        {
+            int year   = _systemTimeYearSpin.ValueAsInt;
+            int month  = _systemTimeMonthSpin.ValueAsInt;
+            int day    = _systemTimeDaySpin.ValueAsInt;
+            int hour   = _systemTimeHourSpin.ValueAsInt;
+            int minute = _systemTimeMinuteSpin.ValueAsInt;
+
+            if (!DateTime.TryParse(year + "-" + month + "-" + day + " " + hour + ":" + minute, out DateTime newTime))
+            {
+                UpdateSystemTimeSpinners();
+
+                return;
+            }
+
+            newTime = newTime.AddSeconds(DateTime.Now.Second).AddMilliseconds(DateTime.Now.Millisecond);
+
+            long systemTimeOffset = (long)Math.Ceiling((newTime - DateTime.Now).TotalMinutes) * 60L;
+
+            if (_systemTimeOffset != systemTimeOffset)
+            {
+                _systemTimeOffset = systemTimeOffset;
+                UpdateSystemTimeSpinners();
+            }
+        }
+
         private void Button_Pressed(object sender, EventArgs args, ToggleButton button)
         {
             if (_listeningForKeypress == false)
@@ -369,9 +462,14 @@ namespace Ryujinx.Ui
 
         private void OpenLogsFolder_Pressed(object sender, EventArgs args)
         {
+            string logPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+            
+            DirectoryInfo directory = new DirectoryInfo(logPath);
+            directory.Create();
+
             Process.Start(new ProcessStartInfo()
             {
-                FileName        = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs"),
+                FileName        = logPath,
                 UseShellExecute = true,
                 Verb            = "open"
             });
@@ -442,11 +540,15 @@ namespace Ryujinx.Ui
 
             ConfigurationState.Instance.System.Language.Value              = (Language)Enum.Parse(typeof(Language), _systemLanguageSelect.ActiveId);
             ConfigurationState.Instance.System.Region.Value                = (Configuration.System.Region)Enum.Parse(typeof(Configuration.System.Region), _systemRegionSelect.ActiveId);
+            ConfigurationState.Instance.Graphics.MaxAnisotropy.Value       = float.Parse(_anisotropy.ActiveId);
             ConfigurationState.Instance.Hid.ControllerType.Value           = (ControllerType)Enum.Parse(typeof(ControllerType), _controller1Type.ActiveId);
             ConfigurationState.Instance.Ui.CustomThemePath.Value           = _custThemePath.Buffer.Text;
             ConfigurationState.Instance.Graphics.ShadersDumpPath.Value     = _graphicsShadersDumpPath.Buffer.Text;
             ConfigurationState.Instance.Ui.GameDirs.Value                  = gameDirs;
             ConfigurationState.Instance.System.FsGlobalAccessLogMode.Value = (int)_fsLogSpinAdjustment.Value;
+
+            ConfigurationState.Instance.System.TimeZone.Value              = _systemTimeZoneSelect.ActiveId;
+            ConfigurationState.Instance.System.SystemTimeOffset.Value      = _systemTimeOffset;
 
             MainWindow.SaveConfig();
             MainWindow.ApplyTheme();

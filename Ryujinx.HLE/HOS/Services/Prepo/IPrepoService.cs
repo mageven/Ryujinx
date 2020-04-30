@@ -1,11 +1,11 @@
+using MsgPack;
 using MsgPack.Serialization;
 using Ryujinx.Common;
 using Ryujinx.Common.Logging;
+using Ryujinx.Common.Utilities;
 using Ryujinx.HLE.HOS.Services.Account.Acc;
 using Ryujinx.HLE.Utilities;
-using System.IO;
 using System.Text;
-using Utf8Json;
 
 namespace Ryujinx.HLE.HOS.Services.Prepo
 {
@@ -48,6 +48,27 @@ namespace Ryujinx.HLE.HOS.Services.Prepo
             return ProcessReport(context, withUserID: true);
         }
 
+        [Command(10200)]
+        // RequestImmediateTransmission()
+        public ResultCode RequestImmediateTransmission(ServiceCtx context)
+        {
+            // It signals an event of nn::prepo::detail::service::core::TransmissionStatusManager that requests the transmission of the report.
+            // Since we don't use reports it's fine to do nothing.
+
+            return ResultCode.Success;
+        }
+
+        [Command(10300)]
+        // GetTransmissionStatus() -> u32
+        public ResultCode GetTransmissionStatus(ServiceCtx context)
+        {
+            // It returns the transmission result of nn::prepo::detail::service::core::TransmissionStatusManager.
+            // Since we don't use reports it's fine to return ResultCode.Success.
+            context.ResponseData.Write((int)ResultCode.Success);
+
+            return ResultCode.Success;
+        }
+
         private ResultCode ProcessReport(ServiceCtx context, bool withUserID)
         {
             UserId  userId   = withUserID ? context.RequestData.ReadStruct<UserId>() : new UserId();
@@ -83,35 +104,21 @@ namespace Ryujinx.HLE.HOS.Services.Prepo
 
         private string ReadReportBuffer(byte[] buffer, string room, UserId userId)
         {
-            StringBuilder sb = new StringBuilder();
+            StringBuilder     builder = new StringBuilder();
+            MessagePackObject deserializedReport = MessagePackSerializer.UnpackMessagePackObject(buffer);
 
-            sb.AppendLine();
-            sb.AppendLine("PlayReport log:");
+            builder.AppendLine();
+            builder.AppendLine("PlayReport log:");
 
             if (!userId.IsNull)
             {
-                sb.AppendLine($" UserId: {userId.ToString()}");
+                builder.AppendLine($" UserId: {userId.ToString()}");
             }
 
-            sb.AppendLine($" Room: {room}");
+            builder.AppendLine($" Room: {room}");
+            builder.AppendLine($" Report: {MessagePackObjectFormatter.Format(deserializedReport)}");
 
-            var    deserializedReport = Deserialize<dynamic>(buffer);
-            string jsonReport         = Encoding.ASCII.GetString(JsonSerializer.PrettyPrintByteArray(Encoding.UTF8.GetBytes(deserializedReport.ToString())));
-
-            sb.AppendLine($" Report:");
-            sb.AppendLine(jsonReport);
-
-            return sb.ToString();
-        }
-
-        private static T Deserialize<T>(byte[] bytes)
-        {
-            MessagePackSerializer serializer = MessagePackSerializer.Get<T>();
-
-            using (MemoryStream byteStream = new MemoryStream(bytes))
-            {
-                return (T)serializer.Unpack(byteStream);
-            }
+            return builder.ToString();
         }
     }
 }

@@ -12,9 +12,11 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         public int LocalMemorySize { get; }
 
-        public OutputMapTarget[] OmapTargets    { get; }
-        public bool              OmapSampleMask { get; }
-        public bool              OmapDepth      { get; }
+        public ImapPixelType[] ImapTypes { get; }
+
+        public OmapTarget[] OmapTargets    { get; }
+        public bool         OmapSampleMask { get; }
+        public bool         OmapDepth      { get; }
 
         public TranslationFlags Flags { get; }
 
@@ -26,6 +28,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             OutputTopology    = OutputTopology.PointList;
             MaxOutputVertices = 0;
             LocalMemorySize   = 0;
+            ImapTypes         = null;
             OmapTargets       = null;
             OmapSampleMask    = false;
             OmapDepth         = false;
@@ -39,6 +42,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             OutputTopology    = header.OutputTopology;
             MaxOutputVertices = header.MaxOutputVertexCount;
             LocalMemorySize   = header.ShaderLocalMemoryLowSize + header.ShaderLocalMemoryHighSize;
+            ImapTypes         = header.ImapTypes;
             OmapTargets       = header.OmapTargets;
             OmapSampleMask    = header.OmapSampleMask;
             OmapDepth         = header.OmapDepth;
@@ -98,6 +102,8 @@ namespace Ryujinx.Graphics.Shader.Translation
                         return 16;
                     case QueryInfoName.SupportsNonConstantTextureOffset:
                         return Convert.ToInt32(true);
+                    case QueryInfoName.TextureFormat:
+                        return (int)TextureFormat.R8G8B8A8Unorm;
                 }
             }
 

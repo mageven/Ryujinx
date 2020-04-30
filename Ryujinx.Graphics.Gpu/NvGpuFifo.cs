@@ -62,13 +62,13 @@ namespace Ryujinx.Graphics.Gpu
             /// </summary>
             /// <param name="mme">Program code</param>
             /// <param name="state">Current GPU state</param>
-            public void Execute(int[] mme, ShadowRamControl shadowCtrl, GpuState state, GpuState shadowState)
+            public void Execute(int[] mme, ShadowRamControl shadowCtrl, GpuState state)
             {
                 if (_executionPending)
                 {
                     _executionPending = false;
 
-                    _interpreter?.Execute(mme, Position, _argument, shadowCtrl, state, shadowState);
+                    _interpreter?.Execute(mme, Position, _argument, shadowCtrl, state);
                 }
             }
 
@@ -102,11 +102,6 @@ namespace Ryujinx.Graphics.Gpu
             public GpuState State { get; }
 
             /// <summary>
-            /// Sub-channel shadow GPU state (used as backup storage to restore MME changes).
-            /// </summary>
-            public GpuState ShadowState { get; }
-
-            /// <summary>
             /// Engine bound to the sub-channel.
             /// </summary>
             public ClassId  Class { get; set; }
@@ -117,11 +112,12 @@ namespace Ryujinx.Graphics.Gpu
             public SubChannel()
             {
                 State = new GpuState();
-                ShadowState = new GpuState();
             }
         }
 
         private SubChannel[] _subChannels;
+
+        private SubChannel _fifoChannel;
 
         /// <summary>
         /// Creates a new instance of the GPU commands FIFO.
@@ -135,14 +131,47 @@ namespace Ryujinx.Graphics.Gpu
 
             _mme = new int[MmeWords];
 
+            _fifoChannel = new SubChannel();
+
+            _context.Methods.RegisterCallbacksForFifo(_fifoChannel.State);
+
             _subChannels = new SubChannel[8];
 
             for (int index = 0; index < _subChannels.Length; index++)
             {
                 _subChannels[index] = new SubChannel();
 
-                context.Methods.RegisterCallbacks(_subChannels[index].State);
+                _context.Methods.RegisterCallbacks(_subChannels[index].State);
             }
+        }
+
+        /// <summary>
+        /// Send macro code/data to the MME
+        /// </summary>
+        /// <param name="index">The index in the MME</param>
+        /// <param name="data">The data to use</param>
+        public void SendMacroCodeData(int index, int data)
+        {
+            _mme[index] = data;
+        }
+
+        /// <summary>
+        /// Bind a macro index to a position for the MME
+        /// </summary>
+        /// <param name="index">The macro index</param>
+        /// <param name="position">The position of the macro</param>
+        public void BindMacro(int index, int position)
+        {
+            _macros[index] = new CachedMacro(position);
+        }
+
+        /// <summary>
+        /// Change the shadow RAM setting
+        /// </summary>
+        /// <param name="shadowCtrl">The new Shadow RAM setting</param>
+        public void SetMmeShadowRamControl(ShadowRamControl shadowCtrl)
+        {
+            _shadowCtrl = shadowCtrl;
         }
 
         /// <summary>
@@ -151,68 +180,23 @@ namespace Ryujinx.Graphics.Gpu
         /// <param name="meth">GPU method call parameters</param>
         public void CallMethod(MethodParams meth)
         {
-            if ((NvGpuFifoMeth)meth.Method == NvGpuFifoMeth.BindChannel)
+            if ((MethodOffset)meth.Method == MethodOffset.BindChannel)
             {
-                _subChannels[meth.SubChannel].Class = (ClassId)meth.Argument;
+                _subChannels[meth.SubChannel] = new SubChannel
+                {
+                    Class = (ClassId)meth.Argument
+                };
+
+                _context.Methods.RegisterCallbacks(_subChannels[meth.SubChannel].State);
             }
             else if (meth.Method < 0x60)
             {
-                switch ((NvGpuFifoMeth)meth.Method)
-                {
-                    case NvGpuFifoMeth.WaitForIdle:
-                    {
-                        _context.Methods.PerformDeferredDraws();
-
-                        _context.Renderer.Pipeline.Barrier();
-
-                        break;
-                    }
-
-                    case NvGpuFifoMeth.SetMacroUploadAddress:
-                    {
-                        _currMacroPosition = meth.Argument;
-
-                        break;
-                    }
-
-                    case NvGpuFifoMeth.SendMacroCodeData:
-                    {
-                        _mme[_currMacroPosition++] = meth.Argument;
-
-                        break;
-                    }
-
-                    case NvGpuFifoMeth.SetMacroBindingIndex:
-                    {
-                        _currMacroBindIndex = meth.Argument;
-
-                        break;
-                    }
-
-                    case NvGpuFifoMeth.BindMacro:
-                    {
-                        int position = meth.Argument;
-
-                        _macros[_currMacroBindIndex++] = new CachedMacro(position);
-
-                        break;
-                    }
-
-                    case NvGpuFifoMeth.SetMmeShadowRamControl:
-                    {
-                        _shadowCtrl = (ShadowRamControl)meth.Argument;
-
-                        break;
-                    }
-                }
+                // TODO: check if macros are shared between subchannels or not. For now let's assume they are.
+                _fifoChannel.State.CallMethod(meth, _shadowCtrl);
             }
             else if (meth.Method < 0xe00)
             {
-                SubChannel sc = _subChannels[meth.SubChannel];
-
-                sc.ShadowState.Write(meth.Method, meth.Argument);
-
-                sc.State.CallMethod(meth);
+                _subChannels[meth.SubChannel].State.CallMethod(meth, _shadowCtrl);
             }
             else
             {
@@ -229,9 +213,7 @@ namespace Ryujinx.Graphics.Gpu
 
                 if (meth.IsLastCall)
                 {
-                    SubChannel sc = _subChannels[meth.SubChannel];
-
-                    _macros[macroIndex].Execute(_mme, _shadowCtrl, sc.State, sc.ShadowState);
+                    _macros[macroIndex].Execute(_mme, _shadowCtrl, _subChannels[meth.SubChannel].State);
 
                     _context.Methods.PerformDeferredDraws();
                 }

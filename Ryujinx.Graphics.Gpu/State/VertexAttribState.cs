@@ -5,7 +5,9 @@ namespace Ryujinx.Graphics.Gpu.State
     /// </summary>
     struct VertexAttribState
     {
+#pragma warning disable CS0649
         public uint Attribute;
+#pragma warning restore CS0649
 
         /// <summary>
         /// Unpacks the index of the vertex buffer this attribute belongs to.
@@ -14,6 +16,15 @@ namespace Ryujinx.Graphics.Gpu.State
         public int UnpackBufferIndex()
         {
             return (int)(Attribute & 0x1f);
+        }
+
+        /// <summary>
+        /// Unpacks the attribute constant flag.
+        /// </summary>
+        /// <returns>True if the attribute is constant, false otherwise</returns>
+        public bool UnpackIsConstant()
+        {
+            return (Attribute & 0x40) != 0;
         }
 
         /// <summary>

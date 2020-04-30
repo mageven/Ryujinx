@@ -1,5 +1,6 @@
 using Ryujinx.Common;
 using Ryujinx.Graphics.GAL;
+using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Gpu.State;
 using System;
 using System.Runtime.InteropServices;
@@ -11,7 +12,7 @@ namespace Ryujinx.Graphics.Gpu.Engine
         private const int NsToTicksFractionNumerator   = 384;
         private const int NsToTicksFractionDenominator = 625;
 
-        private ulong _runningCounter;
+        private readonly CounterCache _counterCache = new CounterCache();
 
         /// <summary>
         /// Writes a GPU counter to guest memory.
@@ -26,16 +27,16 @@ namespace Ryujinx.Graphics.Gpu.Engine
 
             switch (mode)
             {
-                case ReportMode.Semaphore: ReportSemaphore(state);     break;
-                case ReportMode.Counter:   ReportCounter(state, type); break;
+                case ReportMode.Release: ReleaseSemaphore(state);    break;
+                case ReportMode.Counter: ReportCounter(state, type); break;
             }
         }
 
         /// <summary>
-        /// Writes a GPU semaphore value to guest memory.
+        /// Writes (or Releases) a GPU semaphore value to guest memory.
         /// </summary>
         /// <param name="state">Current GPU state</param>
-        private void ReportSemaphore(GpuState state)
+        private void ReleaseSemaphore(GpuState state)
         {
             var rs = state.Get<ReportState>(MethodOffset.ReportState);
 
@@ -81,15 +82,13 @@ namespace Ryujinx.Graphics.Gpu.Engine
                     break;
             }
 
-            ulong ticks;
+            ulong ticks = ConvertNanosecondsToTicks((ulong)PerformanceCounter.ElapsedNanoseconds);
 
             if (GraphicsConfig.FastGpuTime)
             {
-                ticks = _runningCounter++;
-            }
-            else
-            {
-                ticks = ConvertNanosecondsToTicks((ulong)PerformanceCounter.ElapsedNanoseconds);
+                // Divide by some amount to report time as if operations were performed faster than they really are.
+                // This can prevent some games from switching to a lower resolution because rendering is too slow.
+                ticks /= 256;
             }
 
             counterData.Counter   = counter;
@@ -102,6 +101,8 @@ namespace Ryujinx.Graphics.Gpu.Engine
             var rs = state.Get<ReportState>(MethodOffset.ReportState);
 
             _context.MemoryAccessor.Write(rs.Address.Pack(), data);
+
+            _counterCache.AddOrUpdate(rs.Address.Pack());
         }
 
         /// <summary>

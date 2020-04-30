@@ -7,7 +7,7 @@ using OpenTK.Platform;
 using Ryujinx.Configuration;
 using Ryujinx.Graphics.OpenGL;
 using Ryujinx.HLE;
-using Ryujinx.HLE.Input;
+using Ryujinx.HLE.HOS.Services.Hid;
 using Ryujinx.Ui;
 using System;
 using System.Collections.Generic;
@@ -138,7 +138,10 @@ namespace Ryujinx.Ui
                     {
                         if (keyboard.IsKeyDown(OpenTK.Input.Key.Escape))
                         {
-                            Exit();
+                            if (GtkDialog.CreateExitDialog())
+                            {
+                                Exit();
+                            }
                         }
                         else
                         {
@@ -189,12 +192,17 @@ namespace Ryujinx.Ui
                 parent.Present();
 
                 string titleNameSection = string.IsNullOrWhiteSpace(_device.System.TitleName) ? string.Empty
-                    : " | " + _device.System.TitleName;
+                    : $" - {_device.System.TitleName}";
+
+                string titleVersionSection = string.IsNullOrWhiteSpace(_device.System.TitleVersionString) ? string.Empty
+                    : $" v{_device.System.TitleVersionString}";
 
                 string titleIdSection = string.IsNullOrWhiteSpace(_device.System.TitleIdText) ? string.Empty
-                    : " | " + _device.System.TitleIdText.ToUpper();
+                    : $" ({_device.System.TitleIdText.ToUpper()})";
 
-                parent.Title = $"Ryujinx {Program.Version}{titleNameSection}{titleIdSection}";
+                string titleArchSection = _device.System.TitleIs64Bit ? " (64-bit)" : " (32-bit)";
+
+                parent.Title = $"Ryujinx {Program.Version}{titleNameSection}{titleVersionSection}{titleIdSection}{titleArchSection}";
             });
 
             Thread renderLoopThread = new Thread(Render)
@@ -338,11 +346,8 @@ namespace Ryujinx.Ui
                     StatusUpdatedEvent?.Invoke(this, new StatusUpdatedEventArgs(
                         _device.EnableDeviceVsync, 
                         $"Host: {_device.Statistics.GetSystemFrameRate():00.00} FPS", 
-                        $"Game: {_device.Statistics.GetGameFrameRate():00.00} FPS"));
-
-                    _device.System.SignalVsync();
-
-                    _device.VsyncEvent.Set();
+                        $"Game: {_device.Statistics.GetGameFrameRate():00.00} FPS",
+                        $"GPU: {_renderer.GpuVendor}"));
 
                     _ticks = Math.Min(_ticks - _ticksPerFrame, _ticksPerFrame);
                 }
@@ -378,10 +383,10 @@ namespace Ryujinx.Ui
             }
 
             HotkeyButtons currentHotkeyButtons = 0;
-            ControllerButtons currentButton = 0;
+            ControllerKeys currentButton = 0;
             JoystickPosition leftJoystick;
             JoystickPosition rightJoystick;
-            HLE.Input.Keyboard? hidKeyboard = null;
+            KeyboardInput? hidKeyboard = null;
 
             int leftJoystickDx = 0;
             int leftJoystickDy = 0;
@@ -413,7 +418,7 @@ namespace Ryujinx.Ui
 
             if (!hidKeyboard.HasValue)
             {
-                hidKeyboard = new HLE.Input.Keyboard
+                hidKeyboard = new KeyboardInput
                 {
                     Modifier = 0,
                     Keys = new int[0x8]
@@ -485,8 +490,8 @@ namespace Ryujinx.Ui
 
                     TouchPoint currentPoint = new TouchPoint
                     {
-                        X = mX,
-                        Y = mY,
+                        X = (uint)mX,
+                        Y = (uint)mY,
 
                         // Placeholder values till more data is acquired
                         DiameterX = 10,
@@ -496,23 +501,29 @@ namespace Ryujinx.Ui
 
                     hasTouch = true;
 
-                    _device.Hid.SetTouchPoints(currentPoint);
+                    _device.Hid.Touchscreen.Update(currentPoint);
                 }
             }
 
             if (!hasTouch)
             {
-                _device.Hid.SetTouchPoints();
+                _device.Hid.Touchscreen.Update();
             }
 
             if (ConfigurationState.Instance.Hid.EnableKeyboard && hidKeyboard.HasValue)
             {
-                _device.Hid.WriteKeyboard(hidKeyboard.Value);
+                _device.Hid.Keyboard.Update(hidKeyboard.Value);
             }
 
-            BaseController controller = _device.Hid.PrimaryController;
+            _device.Hid.DebugPad.Update();
 
-            controller.SendInput(currentButton, leftJoystick, rightJoystick);
+            _device.Hid.Npads.SetGamepadsInput(new GamepadInput
+            {
+                PlayerId = PlayerIndex.Auto,
+                Buttons = currentButton,
+                LStick = leftJoystick,
+                RStick = rightJoystick
+            });
 
             // Toggle vsync
             if (currentHotkeyButtons.HasFlag(HotkeyButtons.ToggleVSync) &&
