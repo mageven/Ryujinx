@@ -45,5 +45,12 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
         public WaveBuffer WaveBuffer1;
         public WaveBuffer WaveBuffer2;
         public WaveBuffer WaveBuffer3;
+
+        public int VoiceChannelID0;
+        public int VoiceChannelID1;
+        public int VoiceChannelID2;
+        public int VoiceChannelID3;
+        public int VoiceChannelID4;
+        public int VoiceChannelID5;
     }
 }

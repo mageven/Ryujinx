@@ -44,6 +44,8 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
         public VoiceChannelResourceIn[] _channelState;
 
+        public VoiceChannelResourceIn[] channelinfo = new VoiceChannelResourceIn[6];
+
         public IAudioRenderer(
             Horizon                system,
             MemoryManager          memory,
@@ -194,6 +196,14 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
                     continue;
                 }
                 voiceCtx.VoiceSlot = voice.VoiceSlot;
+               // voiceCtx.ChannelState = _channelState;
+                // voiceCtx.ChannelresourceID = new int[6];
+                voiceCtx.ChannelresourceID[0] = voice.VoiceChannelID0;
+                voiceCtx.ChannelresourceID[1] = voice.VoiceChannelID1;
+                voiceCtx.ChannelresourceID[2] = voice.VoiceChannelID2;
+                voiceCtx.ChannelresourceID[3] = voice.VoiceChannelID3;
+                voiceCtx.ChannelresourceID[4] = voice.VoiceChannelID4;
+                voiceCtx.ChannelresourceID[5] = voice.VoiceChannelID5;
 
                 if (voice.FirstUpdate != 0)
                 {
@@ -365,6 +375,12 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
                     continue;
                 }
 
+                for (int channel = 0; channel < voice.ChannelsCount; channel++)
+                {
+                    int channel_resource_id = voice.ChannelresourceID[channel];
+                    channelinfo[channel] = _channelState[channel_resource_id];
+                }
+
                 int   outOffset      = 0;
                 int   pendingSamples = MixBufferSamplesCount;
 
@@ -383,10 +399,15 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
                     {
                         float sampleL = samples[offset] * voice.Volume;
                         float sampleR = samples[offset] * voice.Volume;
-                        if (_channelState[voice.VoiceSlot].is_used)
+
+
+                        if (channelinfo[0].is_used)
                         {
-                            sampleL *= _channelState[voice.VoiceSlot].mix_volume.vol1;
-                            sampleR *= _channelState[voice.VoiceSlot].mix_volume.vol2;
+                            sampleL *= channelinfo[0].mix_volume.vol1;
+                        }
+                        if (channelinfo[1].is_used)
+                        {
+                            sampleR *= channelinfo[1].mix_volume.vol2;
                         }
 
                         if (outOffset % 2 == 0 || voice.ChannelsCount == 1)
