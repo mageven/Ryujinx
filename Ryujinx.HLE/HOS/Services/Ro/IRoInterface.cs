@@ -1,4 +1,5 @@
-﻿using Ryujinx.Common;
+﻿using LibHac.FsSystem;
+using Ryujinx.Common;
 using Ryujinx.Cpu;
 using Ryujinx.HLE.HOS.Kernel.Common;
 using Ryujinx.HLE.HOS.Kernel.Memory;
@@ -163,7 +164,7 @@ namespace Ryujinx.HLE.HOS.Services.Ro
 
             stream.Position = 0;
 
-            NroExecutable executable = new NroExecutable(stream, nroAddress, bssAddress);
+            NroExecutable executable = new NroExecutable(stream.AsStorage(), nroAddress, bssAddress);
 
             // check if everything is page align.
             if ((executable.Text.Length & 0xFFF) != 0 || (executable.Ro.Length & 0xFFF) != 0 ||

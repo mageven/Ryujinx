@@ -396,7 +396,7 @@ namespace Ryujinx.HLE.HOS
             if (isNro)
             {
                 FileStream input = new FileStream(filePath, FileMode.Open);
-                NroExecutable obj = new NroExecutable(input);
+                NroExecutable obj = new NroExecutable(input.AsStorage());
                 nro = obj;
 
                 // homebrew NRO can actually have some data after the actual NRO
