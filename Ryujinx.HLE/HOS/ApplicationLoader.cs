@@ -293,8 +293,8 @@ namespace Ryujinx.HLE.HOS
             }
             else
             {
-                IStorage layeredStorage = _fileSystem.ModLoader.ApplyLayeredFs(TitleId, dataStorage);
-                _fileSystem.SetRomFs(layeredStorage.AsStream(FileAccess.Read));
+                IStorage newStorage = _fileSystem.ModLoader.ApplyRomFsMods(TitleId, dataStorage);
+                _fileSystem.SetRomFs(newStorage.AsStream(FileAccess.Read));
             }
 
             if (TitleId != 0)

@@ -1,6 +1,8 @@
+using LibHac.Common;
 using LibHac.Fs;
 using LibHac.FsSystem;
 using LibHac.FsSystem.RomFs;
+using LibHac.FsService;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.Loaders.Mods;
@@ -123,7 +125,7 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
-        internal IStorage ApplyLayeredFs(ulong titleId, IStorage baseStorage)
+        internal IStorage ApplyRomFsMods(ulong titleId, IStorage baseStorage)
         {
             if (Mods.TryGetValue(titleId, out var titleMods))
             {
@@ -131,26 +133,46 @@ namespace Ryujinx.HLE.HOS
                                 .Where(mod => mod.Enabled && mod.Romfs.Exists)
                                 .Select(mod => mod.Romfs);
 
-                var layers = new List<IFileSystem>();
+                HashSet<string> replacedFiles = new HashSet<string>();
+
+                Logger.PrintInfo(LogClass.Loader, "Applying mods to RomFS...");
+                var rfsb = new RomFsBuilder();
 
                 foreach (var romfsDir in romfsDirs)
                 {
-                    LocalFileSystem fs = new LocalFileSystem(romfsDir.FullName);
-                    layers.Add(fs);
+                    using LocalFileSystem fs = new LocalFileSystem(romfsDir.FullName);
+                    foreach (var entry in fs.EnumerateEntries()
+                                           .Where(f => f.Type == DirectoryEntryType.File)
+                                           .OrderBy(f => f.FullPath, StringComparer.Ordinal))
+                    {
+                        fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                        if(replacedFiles.Add(entry.FullPath))
+                        {
+                            rfsb.AddFile(entry.FullPath, file);
+                        }
+                        else
+                        {
+                            Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{romfsDir.Parent.Name}'");
+                        }
+                    }
                 }
 
-                if (layers.Count > 0)
+                Logger.PrintInfo(LogClass.Loader, $"Located {replacedFiles.Count} modded files. Processing base storage...");
+                var baseRfs = new RomFsFileSystem(baseStorage);
+
+                foreach (var entry in baseRfs.EnumerateEntries()
+                                             .Where(f => f.Type == DirectoryEntryType.File && !replacedFiles.Contains(f.FullPath))
+                                             .OrderBy(f => f.FullPath, StringComparer.Ordinal))
                 {
-                    layers.Add(new RomFsFileSystem(baseStorage));
-
-                    LayeredFileSystem lfs = new LayeredFileSystem(layers);
-
-                    Logger.PrintInfo(LogClass.Loader, $"Applying {layers.Count - 1} layers to RomFS");
-                    IStorage lfsStorage = new RomFsBuilder(lfs).Build();
-                    Logger.PrintInfo(LogClass.Loader, "Finished building modded RomFS");
-
-                    return lfsStorage;
+                    baseRfs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                    rfsb.AddFile(entry.FullPath, file);
                 }
+
+                Logger.PrintInfo(LogClass.Loader, "Building modded RomFS...");
+                IStorage newStorage = rfsb.Build();
+                Logger.PrintInfo(LogClass.Loader, "New RomFS built");
+
+                return newStorage;
             }
 
             return baseStorage;
@@ -182,6 +204,8 @@ namespace Ryujinx.HLE.HOS
                 _ => string.Empty
             }).ToList();
 
+            static string GetModName(DirectoryInfo exefsDir) => exefsDir.Name == ExefsDir ? exefsDir.Parent.Name : exefsDir.Name;
+
             int GetIndex(string buildId) => buildIds.FindIndex(id => id == buildId); // O(n) but list is small
 
             foreach (var patchDir in dirs)
@@ -201,7 +225,7 @@ namespace Ryujinx.HLE.HOS
                                     continue;
                                 }
 
-                                Logger.PrintInfo(LogClass.Loader, $"Found matching IPS patch for bid={buildId} - '{patchFile.Name}'");
+                                Logger.PrintInfo(LogClass.Loader, $"Found IPS patch '{GetModName(patchDir)}'/'{patchFile.Name}' bid={buildId}");
 
                                 using var fs = patchFile.OpenRead();
                                 using var reader = new BinaryReader(fs);
@@ -223,7 +247,7 @@ namespace Ryujinx.HLE.HOS
                                     continue;
                                 }
 
-                                Logger.PrintInfo(LogClass.Loader, $"Found matching IPSwitch patch for bid={patcher.BuildId} - '{patchFile.Name}'");
+                                Logger.PrintInfo(LogClass.Loader, $"Found IPSwitch patch '{GetModName(patchDir)}'/'{patchFile.Name}' bid={patcher.BuildId}");
 
                                 patcher.AddPatches(patches[index]);
                             }
