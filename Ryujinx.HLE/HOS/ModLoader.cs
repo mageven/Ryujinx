@@ -1,3 +1,6 @@
+using LibHac.Fs;
+using LibHac.FsSystem;
+using LibHac.FsSystem.RomFs;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.Loaders.Mods;
@@ -92,7 +95,7 @@ namespace Ryujinx.HLE.HOS
                                 {
                                     var modEntry = new ModEntry(modDir, true);
 
-                                    Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] '{modEntry.ModName}'");
+                                    Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] '{modEntry.ModName}'{(modEntry.Exefs.Exists ? " Exefs" : "")}{(modEntry.Romfs.Exists ? " Romfs" : "")}");
 
                                     if (!(modEntry.Romfs.Exists || modEntry.Exefs.Exists))
                                     {
@@ -118,6 +121,39 @@ namespace Ryujinx.HLE.HOS
                     }
                 }
             }
+        }
+
+        internal IStorage ApplyLayeredFs(ulong titleId, IStorage baseStorage)
+        {
+            if (Mods.TryGetValue(titleId, out var titleMods))
+            {
+                var romfsDirs = titleMods
+                                .Where(mod => mod.Enabled && mod.Romfs.Exists)
+                                .Select(mod => mod.Romfs);
+
+                var layers = new List<IFileSystem>();
+
+                foreach (var romfsDir in romfsDirs)
+                {
+                    LocalFileSystem fs = new LocalFileSystem(romfsDir.FullName);
+                    layers.Add(fs);
+                }
+
+                if (layers.Count > 0)
+                {
+                    layers.Add(new RomFsFileSystem(baseStorage));
+
+                    LayeredFileSystem lfs = new LayeredFileSystem(layers);
+
+                    Logger.PrintInfo(LogClass.Loader, $"Applying {layers.Count - 1} layers to RomFS");
+                    IStorage lfsStorage = new RomFsBuilder(lfs).Build();
+                    Logger.PrintInfo(LogClass.Loader, "Finished building modded RomFS");
+
+                    return lfsStorage;
+                }
+            }
+
+            return baseStorage;
         }
 
         internal void ApplyProgramPatches(ulong titleId, int protectedOffset, params IExecutable[] programs)
