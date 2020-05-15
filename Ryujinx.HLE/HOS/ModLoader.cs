@@ -20,6 +20,7 @@ namespace Ryujinx.HLE.HOS
 
         private const string RootModsDir = "mods";
         private const string RomfsDir = "romfs";
+        private const string RomfsStorageFile = "romfs.storage";
         private const string ExefsDir = "exefs";
         private const string ExefsPatchesDir = "exefs_patches";
         private const string NroPatchesDir = "nro_patches";
@@ -27,23 +28,27 @@ namespace Ryujinx.HLE.HOS
         public struct ModEntry
         {
             public readonly DirectoryInfo ModDir;
-            public readonly DirectoryInfo Romfs;
             public readonly DirectoryInfo Exefs;
+            public readonly DirectoryInfo Romfs;
+            public readonly FileInfo RomfsFile;
 
             public bool Enabled;
 
-            public ModEntry(DirectoryInfo modDir, bool enabled) // TODO: input DirectoryInfo
+            public ModEntry(DirectoryInfo modDir, bool enabled)
             {
                 ModDir = modDir;
 
-                Romfs = new DirectoryInfo(Path.Combine(modDir.FullName, RomfsDir));
                 Exefs = new DirectoryInfo(Path.Combine(modDir.FullName, ExefsDir));
+                Romfs = new DirectoryInfo(Path.Combine(modDir.FullName, RomfsDir));
+                RomfsFile = new FileInfo(Path.Combine(modDir.FullName, RomfsStorageFile));
 
                 Enabled = enabled;
             }
 
             public string ModName => ModDir.Name;
-            public string ModPath => ModDir.FullName;
+            public bool Empty => !(Exefs.Exists||RomfsFile.Exists||Romfs.Exists);
+
+            public override string ToString() => $"'{ModName}' ({(Exefs.Exists ? "E" : "")}{(RomfsFile.Exists ? "r" : "")}{(Romfs.Exists ? "R" : "")})";
         }
 
         public List<string> ModRootDirs { get; private set; }
@@ -91,15 +96,15 @@ namespace Ryujinx.HLE.HOS
                             break;
 
                         default:
-                            if (UInt64.TryParse(titleDir.Name, System.Globalization.NumberStyles.HexNumber, null, out ulong titleId))
+                            if (UInt64.TryParse(titleDir.Name, System.Globalization.NumberStyles.HexNumber, null, out ulong titleId)) //TODO: Add friendly name support
                             {
                                 foreach (var modDir in titleDir.EnumerateDirectories())
                                 {
                                     var modEntry = new ModEntry(modDir, true);
 
-                                    Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] '{modEntry.ModName}'{(modEntry.Exefs.Exists ? " Exefs" : "")}{(modEntry.Romfs.Exists ? " Romfs" : "")}");
+                                    Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] {modEntry}");
 
-                                    if (!(modEntry.Romfs.Exists || modEntry.Exefs.Exists))
+                                    if (modEntry.Empty)
                                     {
                                         Logger.PrintWarning(LogClass.Application, $"{modEntry.ModName} is empty");
                                     }
@@ -125,52 +130,107 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
+        private int ApplyRomFsModStorages(IEnumerable<FileInfo> storageFiles, HashSet<string> fileSet, RomFsBuilder builder)
+        {
+            int modCount = 0;
+
+            foreach (var storageFile in storageFiles)
+            {
+                var fs = new RomFsFileSystem(storageFile.OpenRead().AsStorage());
+                foreach (var entry in fs.EnumerateEntries()
+                                       .Where(f => f.Type == DirectoryEntryType.File)
+                                       .OrderBy(f => f.FullPath, StringComparer.Ordinal))
+                {
+                    fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                    if (fileSet.Add(entry.FullPath))
+                    {
+                        builder.AddFile(entry.FullPath, file);
+                    }
+                    else
+                    {
+                        Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{storageFile.Directory.Name}'");
+                    }
+                }
+                
+                modCount++;
+            }
+
+            return modCount;
+        }
+
+        private int ApplyRomFsModDirs(IEnumerable<DirectoryInfo> romfsDirs, HashSet<string> fileSet, RomFsBuilder builder)
+        {
+            int modCount = 0;
+
+            foreach (var romfsDir in romfsDirs)
+            {
+                using LocalFileSystem fs = new LocalFileSystem(romfsDir.FullName);
+                foreach (var entry in fs.EnumerateEntries()
+                                       .Where(f => f.Type == DirectoryEntryType.File)
+                                       .OrderBy(f => f.FullPath, StringComparer.Ordinal))
+                {
+                    fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                    if (fileSet.Add(entry.FullPath))
+                    {
+                        builder.AddFile(entry.FullPath, file);
+                    }
+                    else
+                    {
+                        Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{romfsDir.Parent.Name}'");
+                    }
+                }
+                
+                modCount++;
+            }
+
+            return modCount;
+        }
+
         internal IStorage ApplyRomFsMods(ulong titleId, IStorage baseStorage)
         {
             if (Mods.TryGetValue(titleId, out var titleMods))
             {
-                var romfsDirs = titleMods
-                                .Where(mod => mod.Enabled && mod.Romfs.Exists)
+                var enabledMods = titleMods.Where(mod => mod.Enabled);
+
+                var romfsContainers = enabledMods
+                                      .Where(mod => mod.RomfsFile.Exists)
+                                      .Select(mod => mod.RomfsFile);
+
+                var romfsDirs = enabledMods
+                                .Where(mod => !mod.RomfsFile.Exists && mod.Romfs.Exists)
                                 .Select(mod => mod.Romfs);
 
-                HashSet<string> replacedFiles = new HashSet<string>();
+                var fileSet = new HashSet<string>();
+                var builder = new RomFsBuilder();
 
-                Logger.PrintInfo(LogClass.Loader, "Applying mods to RomFS...");
-                var rfsb = new RomFsBuilder();
+                int appliedCount = 0;
 
-                foreach (var romfsDir in romfsDirs)
+                Logger.PrintInfo(LogClass.Loader, "Collecting RomFs Containers...");
+                appliedCount += ApplyRomFsModStorages(romfsContainers, fileSet, builder);
+
+                Logger.PrintInfo(LogClass.Loader, "Collecting RomFs Dirs...");
+                appliedCount += ApplyRomFsModDirs(romfsDirs, fileSet, builder);
+
+                if(appliedCount == 0)
                 {
-                    using LocalFileSystem fs = new LocalFileSystem(romfsDir.FullName);
-                    foreach (var entry in fs.EnumerateEntries()
-                                           .Where(f => f.Type == DirectoryEntryType.File)
-                                           .OrderBy(f => f.FullPath, StringComparer.Ordinal))
-                    {
-                        fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
-                        if(replacedFiles.Add(entry.FullPath))
-                        {
-                            rfsb.AddFile(entry.FullPath, file);
-                        }
-                        else
-                        {
-                            Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{romfsDir.Parent.Name}'");
-                        }
-                    }
+                    Logger.PrintInfo(LogClass.Loader, "Using base RomFs");
+                    return baseStorage;
                 }
 
-                Logger.PrintInfo(LogClass.Loader, $"Located {replacedFiles.Count} modded files. Processing base storage...");
+                Logger.PrintInfo(LogClass.Loader, $"Found {fileSet.Count} modded files over {appliedCount} mods. Processing base storage...");
                 var baseRfs = new RomFsFileSystem(baseStorage);
 
                 foreach (var entry in baseRfs.EnumerateEntries()
-                                             .Where(f => f.Type == DirectoryEntryType.File && !replacedFiles.Contains(f.FullPath))
+                                             .Where(f => f.Type == DirectoryEntryType.File && !fileSet.Contains(f.FullPath))
                                              .OrderBy(f => f.FullPath, StringComparer.Ordinal))
                 {
                     baseRfs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
-                    rfsb.AddFile(entry.FullPath, file);
+                    builder.AddFile(entry.FullPath, file);
                 }
 
-                Logger.PrintInfo(LogClass.Loader, "Building modded RomFS...");
-                IStorage newStorage = rfsb.Build();
-                Logger.PrintInfo(LogClass.Loader, "New RomFS built");
+                Logger.PrintInfo(LogClass.Loader, "Building new RomFs...");
+                IStorage newStorage = builder.Build();
+                Logger.PrintInfo(LogClass.Loader, "Using modded RomFs");
 
                 return newStorage;
             }
