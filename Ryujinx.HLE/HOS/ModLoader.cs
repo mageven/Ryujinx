@@ -95,7 +95,7 @@ namespace Ryujinx.HLE.HOS
                             foreach (var modDir in titleDir.EnumerateDirectories())
                             {
                                 _nsoPatches.Add(modDir);
-                                Logger.PrintInfo(LogClass.Application, $"Found exefs_patches Mod {modDir.Name}");
+                                Logger.PrintInfo(LogClass.Application, $"Found exefs_patches Mod '{modDir.Name}'");
 
                                 ModNameCheck(modDir);
                             }
@@ -105,7 +105,7 @@ namespace Ryujinx.HLE.HOS
                             foreach (var modDir in titleDir.EnumerateDirectories())
                             {
                                 _nroPatches.Add(modDir);
-                                Logger.PrintInfo(LogClass.Application, $"Found nro_patches Mod {modDir.Name}");
+                                Logger.PrintInfo(LogClass.Application, $"Found nro_patches Mod '{modDir.Name}'");
 
                                 ModNameCheck(modDir);
                             }
@@ -144,63 +144,6 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
-        // TODO: Combine both romfs methods
-        private int ApplyRomFsModStorages(IEnumerable<FileInfo> storageFiles, HashSet<string> fileSet, RomFsBuilder builder)
-        {
-            int modCount = 0;
-
-            foreach (var storageFile in storageFiles)
-            {
-                var fs = new RomFsFileSystem(storageFile.OpenRead().AsStorage());
-                foreach (var entry in fs.EnumerateEntries()
-                                       .Where(f => f.Type == DirectoryEntryType.File)
-                                       .OrderBy(f => f.FullPath, StringComparer.Ordinal))
-                {
-                    fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
-                    if (fileSet.Add(entry.FullPath))
-                    {
-                        builder.AddFile(entry.FullPath, file);
-                    }
-                    else
-                    {
-                        Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{storageFile.Directory.Name}'");
-                    }
-                }
-
-                modCount++;
-            }
-
-            return modCount;
-        }
-
-        private int ApplyRomFsModDirs(IEnumerable<DirectoryInfo> romfsDirs, HashSet<string> fileSet, RomFsBuilder builder)
-        {
-            int modCount = 0;
-
-            foreach (var romfsDir in romfsDirs)
-            {
-                using LocalFileSystem fs = new LocalFileSystem(romfsDir.FullName);
-                foreach (var entry in fs.EnumerateEntries()
-                                       .Where(f => f.Type == DirectoryEntryType.File)
-                                       .OrderBy(f => f.FullPath, StringComparer.Ordinal))
-                {
-                    fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
-                    if (fileSet.Add(entry.FullPath))
-                    {
-                        builder.AddFile(entry.FullPath, file);
-                    }
-                    else
-                    {
-                        Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{romfsDir.Parent.Name}'");
-                    }
-                }
-
-                modCount++;
-            }
-
-            return modCount;
-        }
-
         internal IStorage ApplyRomFsMods(ulong titleId, IStorage baseStorage)
         {
             if (Mods.TryGetValue(titleId, out var titleMods))
@@ -221,10 +164,10 @@ namespace Ryujinx.HLE.HOS
                 int appliedCount = 0;
 
                 Logger.PrintInfo(LogClass.Loader, "Collecting RomFs Containers...");
-                appliedCount += ApplyRomFsModStorages(romfsContainers, fileSet, builder);
+                appliedCount += CollectRomFsMods(romfsContainers, fileSet, builder);
 
                 Logger.PrintInfo(LogClass.Loader, "Collecting RomFs Dirs...");
-                appliedCount += ApplyRomFsModDirs(romfsDirs, fileSet, builder);
+                appliedCount += CollectRomFsMods(romfsDirs, fileSet, builder);
 
                 if (appliedCount == 0)
                 {
@@ -252,6 +195,49 @@ namespace Ryujinx.HLE.HOS
 
             return baseStorage;
         }
+
+        private int CollectRomFsMods(IEnumerable<FileSystemInfo> fsEntries, HashSet<string> fileSet, RomFsBuilder builder)
+        {
+            static IFileSystem OpenFS(FileSystemInfo e) => e switch
+            {
+                DirectoryInfo romfsDir => new LocalFileSystem(romfsDir.FullName),
+                FileInfo romfsContainer => new RomFsFileSystem(romfsContainer.OpenRead().AsStorage()),
+                _ => null
+            };
+
+            static string GetModName(FileSystemInfo e) => e switch
+            {
+                DirectoryInfo romfsDir => romfsDir.Parent.Name,
+                FileInfo romfsContainer => romfsContainer.Directory.Name,
+                _ => null
+            };
+
+            int modCount = 0;
+
+            foreach (var fsEntry in fsEntries)
+            {
+                using IFileSystem fs = OpenFS(fsEntry);
+                foreach (var entry in fs.EnumerateEntries()
+                                       .Where(f => f.Type == DirectoryEntryType.File)
+                                       .OrderBy(f => f.FullPath, StringComparer.Ordinal))
+                {
+                    fs.OpenFile(out IFile file, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                    if (fileSet.Add(entry.FullPath))
+                    {
+                        builder.AddFile(entry.FullPath, file);
+                    }
+                    else
+                    {
+                        Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{GetModName(fsEntry)}'");
+                    }
+                }
+
+                modCount++;
+            }
+
+            return modCount;
+        }
+
 
         internal void ApplyNroPatches(NroExecutable nro)
         {
