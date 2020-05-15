@@ -46,9 +46,9 @@ namespace Ryujinx.HLE.HOS
             }
 
             public string ModName => ModDir.Name;
-            public bool Empty => !(Exefs.Exists||RomfsFile.Exists||Romfs.Exists);
+            public bool Empty => !(Exefs.Exists || RomfsFile.Exists || Romfs.Exists);
 
-            public override string ToString() => $"'{ModName}' ({(Exefs.Exists ? "E" : "")}{(RomfsFile.Exists ? "r" : "")}{(Romfs.Exists ? "R" : "")})";
+            public override string ToString() => $"[{(Exefs.Exists ? "E" : "")}{(RomfsFile.Exists ? "r" : "")}{(Romfs.Exists ? "R" : "")}] '{ModName}'";
         }
 
         public List<string> ModRootDirs { get; private set; }
@@ -82,7 +82,7 @@ namespace Ryujinx.HLE.HOS
                     switch (titleDir.Name)
                     {
                         case ExefsPatchesDir:
-                            // case NroPatchesDir:
+                        case NroPatchesDir:
                             foreach (var modDir in titleDir.EnumerateDirectories())
                             {
                                 _unconditionalMods.Add(modDir);
@@ -96,7 +96,7 @@ namespace Ryujinx.HLE.HOS
                             break;
 
                         default:
-                            if (UInt64.TryParse(titleDir.Name, System.Globalization.NumberStyles.HexNumber, null, out ulong titleId)) //TODO: Add friendly name support
+                            if (titleDir.Name.Length >= 16 && ulong.TryParse(titleDir.Name.Substring(0, 16), System.Globalization.NumberStyles.HexNumber, null, out ulong titleId))
                             {
                                 foreach (var modDir in titleDir.EnumerateDirectories())
                                 {
@@ -130,6 +130,7 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
+        // TODO: Combine both romfs methods
         private int ApplyRomFsModStorages(IEnumerable<FileInfo> storageFiles, HashSet<string> fileSet, RomFsBuilder builder)
         {
             int modCount = 0;
@@ -151,7 +152,7 @@ namespace Ryujinx.HLE.HOS
                         Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{storageFile.Directory.Name}'");
                     }
                 }
-                
+
                 modCount++;
             }
 
@@ -179,7 +180,7 @@ namespace Ryujinx.HLE.HOS
                         Logger.PrintWarning(LogClass.Loader, $"    Skipped duplicate file '{entry.FullPath}' from '{romfsDir.Parent.Name}'");
                     }
                 }
-                
+
                 modCount++;
             }
 
@@ -211,7 +212,7 @@ namespace Ryujinx.HLE.HOS
                 Logger.PrintInfo(LogClass.Loader, "Collecting RomFs Dirs...");
                 appliedCount += ApplyRomFsModDirs(romfsDirs, fileSet, builder);
 
-                if(appliedCount == 0)
+                if (appliedCount == 0)
                 {
                     Logger.PrintInfo(LogClass.Loader, "Using base RomFs");
                     return baseStorage;
