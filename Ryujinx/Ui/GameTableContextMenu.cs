@@ -37,6 +37,7 @@ namespace Ryujinx.Ui
 
 #pragma warning disable CS0649
 #pragma warning disable IDE0044
+        [GUI] MenuItem _openModDir;
         [GUI] MenuItem _openSaveUserDir;
         [GUI] MenuItem _openSaveDeviceDir;
         [GUI] MenuItem _openSaveBcatDir;
@@ -59,6 +60,7 @@ namespace Ryujinx.Ui
             _virtualFileSystem = virtualFileSystem;
             _controlData       = controlData;
 
+            _openModDir.Activated         += OpenModDir_Clicked;
             _openSaveUserDir.Activated    += OpenSaveUserDir_Clicked;
             _openSaveDeviceDir.Activated  += OpenSaveDeviceDir_Clicked;
             _openSaveBcatDir.Activated    += OpenSaveBcatDir_Clicked;
@@ -78,6 +80,26 @@ namespace Ryujinx.Ui
                 _extractExeFs.Sensitive = false;
                 _extractLogo.Sensitive  = false;
             }
+        }
+
+        private void OpenModDir_Clicked(object sender, EventArgs args)
+        {
+            string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string titleId = _gameTableStore.GetValue(_rowIter, 2).ToString().Split("\n")[1].ToLower();
+            string romfsPath = System.IO.Path.Combine(appDataPath, "Ryujinx", "games", titleId, "mods");
+
+            if (!Directory.Exists(romfsPath))
+            {
+                Directory.CreateDirectory(System.IO.Path.Combine(romfsPath, "My First Mod", "romfs"));
+                Directory.CreateDirectory(System.IO.Path.Combine(romfsPath, "My First Mod", "exefs"));
+            }
+
+            Process.Start(new ProcessStartInfo()
+            {
+                FileName = romfsPath,
+                UseShellExecute = true,
+                Verb = "open"
+            });
         }
 
         private bool TryFindSaveData(string titleName, ulong titleId, BlitStruct<ApplicationControlProperty> controlHolder, SaveDataFilter filter, out ulong saveDataId)
