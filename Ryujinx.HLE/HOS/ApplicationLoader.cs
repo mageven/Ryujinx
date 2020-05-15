@@ -6,7 +6,6 @@ using LibHac.FsSystem;
 using LibHac.FsSystem.NcaUtils;
 using LibHac.Ncm;
 using LibHac.Ns;
-using LibHac.Spl;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.FileSystem;
@@ -390,9 +389,15 @@ namespace Ryujinx.HLE.HOS
             LoadNso("subsdk");
             LoadNso("sdk");
 
+            var programs = nsos.ToArray();
+
+            // Nso patches are created with offset 0 but the program doesn't contain
+            // the header which is 0x100 bytes. So, we adjust for that here
+            _fileSystem.ModLoader.ApplyProgramPatches(TitleId, 0x100, programs);
+
             _contentManager.LoadEntries(_device);
 
-            ProgramLoader.LoadNsos(_device.System.KernelContext, metaData, executables: nsos.ToArray());
+            ProgramLoader.LoadNsos(_device.System.KernelContext, metaData, executables: programs);
         }
 
         public void LoadProgram(string filePath)

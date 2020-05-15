@@ -292,6 +292,8 @@ namespace Ryujinx.Ui
                 ApplicationLibrary.LoadApplications(ConfigurationState.Instance.Ui.GameDirs,
                     _virtualFileSystem, ConfigurationState.Instance.System.Language);
 
+                _virtualFileSystem.ModLoader.InitModsList();
+
                 _updatingGameTable = false;
             });
             applicationLibraryThread.Name = "GUI.ApplicationLibraryThread";
