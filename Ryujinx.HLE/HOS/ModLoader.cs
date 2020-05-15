@@ -53,7 +53,8 @@ namespace Ryujinx.HLE.HOS
 
         public List<string> ModRootDirs { get; private set; }
         public Dictionary<ulong, List<ModEntry>> Mods { get; private set; }
-        private List<DirectoryInfo> _unconditionalMods;
+        private List<DirectoryInfo> _nsoPatches; // unconditional exefs mods
+        private List<DirectoryInfo> _nroPatches; // unconditional nro mods
 
         public ModLoader(VirtualFileSystem vfs)
         {
@@ -66,9 +67,18 @@ namespace Ryujinx.HLE.HOS
         public void InitModsList()
         {
             Mods = new Dictionary<ulong, List<ModEntry>>();
-            _unconditionalMods = new List<DirectoryInfo>();
+            _nsoPatches = new List<DirectoryInfo>();
+            _nroPatches = new List<DirectoryInfo>();
 
+            // Duplicate mod name checking
             var modNames = new HashSet<string>();
+            void ModNameCheck(DirectoryInfo modDir)
+            {
+                if (!modNames.Add(modDir.Name))
+                {
+                    Logger.PrintWarning(LogClass.Application, $"Duplicate mod name '{modDir.Name}'");
+                }
+            }
 
             foreach (string modRootPath in ModRootDirs)
             {
@@ -82,16 +92,22 @@ namespace Ryujinx.HLE.HOS
                     switch (titleDir.Name)
                     {
                         case ExefsPatchesDir:
+                            foreach (var modDir in titleDir.EnumerateDirectories())
+                            {
+                                _nsoPatches.Add(modDir);
+                                Logger.PrintInfo(LogClass.Application, $"Found exefs_patches Mod {modDir.Name}");
+
+                                ModNameCheck(modDir);
+                            }
+                            break;
+
                         case NroPatchesDir:
                             foreach (var modDir in titleDir.EnumerateDirectories())
                             {
-                                _unconditionalMods.Add(modDir);
-                                Logger.PrintInfo(LogClass.Application, $"Found Unconditional Mod {modDir.Name}");
+                                _nroPatches.Add(modDir);
+                                Logger.PrintInfo(LogClass.Application, $"Found nro_patches Mod {modDir.Name}");
 
-                                if (!modNames.Add(modDir.Name))
-                                {
-                                    Logger.PrintWarning(LogClass.Application, $"Duplicate mod name '{modDir.Name}'");
-                                }
+                                ModNameCheck(modDir);
                             }
                             break;
 
@@ -102,17 +118,15 @@ namespace Ryujinx.HLE.HOS
                                 {
                                     var modEntry = new ModEntry(modDir, true);
 
-                                    Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] {modEntry}");
-
                                     if (modEntry.Empty)
                                     {
                                         Logger.PrintWarning(LogClass.Application, $"{modEntry.ModName} is empty");
+                                        continue;
                                     }
 
-                                    if (!modNames.Add(modDir.Name))
-                                    {
-                                        Logger.PrintWarning(LogClass.Application, $"Duplicate mod name '{modDir.Name}'");
-                                    }
+                                    Logger.PrintInfo(LogClass.Application, $"Found Mod [{titleId:X16}] {modEntry}");
+
+                                    ModNameCheck(modDir);
 
                                     if (Mods.TryGetValue(titleId, out List<ModEntry> modEntries))
                                     {
@@ -239,12 +253,19 @@ namespace Ryujinx.HLE.HOS
             return baseStorage;
         }
 
+        internal void ApplyNroPatches(NroExecutable nro)
+        {
+            // NRO patches aren't offset relative to header unlike NSO
+            // according to Atmosphere's ro patcher module
+            ApplyProgramPatches(_nroPatches, 0, nro);
+        }
+
         internal void ApplyProgramPatches(ulong titleId, int protectedOffset, params IExecutable[] programs)
         {
             var exefsDirs = (Mods.TryGetValue(titleId, out var titleMods) ? titleMods : Enumerable.Empty<ModEntry>())
                             .Where(mod => mod.Enabled && mod.Exefs.Exists)
                             .Select(mod => mod.Exefs)
-                            .Concat(_unconditionalMods);
+                            .Concat(_nsoPatches);
 
             ApplyProgramPatches(exefsDirs, protectedOffset, programs);
         }
