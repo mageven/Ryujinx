@@ -61,12 +61,14 @@ namespace Ryujinx.HLE.HOS
 
             LocalFileSystem codeFs = new LocalFileSystem(exeFsDir);
 
-            LoadExeFs(codeFs, out _);
+            Npdm metaData = ReadNpdm(codeFs);
 
             if (TitleId != 0)
             {
                 EnsureSaveData(new TitleId(TitleId));
             }
+
+            LoadExeFs(codeFs, metaData);
         }
 
         private (Nca Main, Nca Patch, Nca Control) GetGameData(PartitionFileSystem pfs)
@@ -183,7 +185,7 @@ namespace Ryujinx.HLE.HOS
             }
 
             // This is not a normal NSP, it's actually a ExeFS as a NSP
-            LoadExeFs(nsp, out _);
+            LoadExeFs(nsp);
         }
 
         public void LoadNca(string ncaFile)
@@ -275,19 +277,7 @@ namespace Ryujinx.HLE.HOS
                 return;
             }
 
-            if (dataStorage == null)
-            {
-                Logger.PrintWarning(LogClass.Loader, "No RomFS found in NCA");
-            }
-            else
-            {
-                _fileSystem.SetRomFs(dataStorage.AsStream(FileAccess.Read));
-            }
-
-            LoadExeFs(codeFs, out Npdm metaData);
-
-            TitleId = metaData.Aci0.TitleId;
-            TitleIs64Bit = metaData.Is64Bit;
+            Npdm metaData = ReadNpdm(codeFs);
 
             if (controlNca != null)
             {
@@ -298,15 +288,49 @@ namespace Ryujinx.HLE.HOS
                 ControlData.ByteSpan.Clear();
             }
 
+            if (dataStorage == null)
+            {
+                Logger.PrintWarning(LogClass.Loader, "No RomFS found in NCA");
+            }
+            else
+            {
+                _fileSystem.SetRomFs(dataStorage.AsStream(FileAccess.Read));
+            }
+
             if (TitleId != 0)
             {
                 EnsureSaveData(new TitleId(TitleId));
             }
 
+            LoadExeFs(codeFs, metaData);
+
             Logger.PrintInfo(LogClass.Loader, $"Application Loaded: {TitleName} v{TitleVersionString} [{TitleIdText}] [{(TitleIs64Bit ? "64-bit" : "32-bit")}]");
         }
 
-        public void ReadControlData(Nca controlNca)
+        // Sets TitleId, so be sure to call before using it
+        private Npdm ReadNpdm(IFileSystem fs)
+        {
+            Result result = fs.OpenFile(out IFile npdmFile, "/main.npdm".ToU8Span(), OpenMode.Read);
+            Npdm metaData;
+
+            if (ResultFs.PathNotFound.Includes(result))
+            {
+                Logger.PrintWarning(LogClass.Loader, "NPDM file not found, using default values!");
+
+                metaData = GetDefaultNpdm();
+            }
+            else
+            {
+                metaData = new Npdm(npdmFile.AsStream());
+            }
+
+            TitleId = metaData.Aci0.TitleId;
+            TitleIs64Bit = metaData.Is64Bit;
+
+            return metaData;
+        }
+
+        private void ReadControlData(Nca controlNca)
         {
             IFileSystem controlFs = controlNca.OpenFileSystem(NcaSectionType.Data, FsIntegrityCheckLevel);
 
@@ -336,20 +360,9 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
-        private void LoadExeFs(IFileSystem codeFs, out Npdm metaData)
+        private void LoadExeFs(IFileSystem codeFs, Npdm metaData = null)
         {
-            Result result = codeFs.OpenFile(out IFile npdmFile, "/main.npdm".ToU8Span(), OpenMode.Read);
-
-            if (ResultFs.PathNotFound.Includes(result))
-            {
-                Logger.PrintWarning(LogClass.Loader, "NPDM file not found, using default values!");
-
-                metaData = GetDefaultNpdm();
-            }
-            else
-            {
-                metaData = new Npdm(npdmFile.AsStream());
-            }
+            metaData ??= ReadNpdm(codeFs);
 
             List<IExecutable> nsos = new List<IExecutable>();
 
@@ -371,9 +384,6 @@ namespace Ryujinx.HLE.HOS
                     nsos.Add(nso);
                 }
             }
-
-            TitleId = metaData.Aci0.TitleId;
-            TitleIs64Bit = metaData.Is64Bit;
 
             LoadNso("rtld");
             LoadNso("main");
