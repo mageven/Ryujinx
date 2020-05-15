@@ -319,7 +319,7 @@ namespace Ryujinx.HLE.HOS
 
             for (int i = 0; i < programs.Length; ++i)
             {
-                patches[i].Apply(programs[i].Program, protectedOffset);
+                patches[i].Patch(programs[i].Program, protectedOffset);
             }
         }
     }
