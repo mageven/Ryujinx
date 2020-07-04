@@ -6,6 +6,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 {
     class VoiceContext
     {
+        public int VoiceSlot { get; set; }
         private bool _acquired;
         private bool _bufferReload;
 
@@ -16,6 +17,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
 
         public int SampleRate    { get; set; }
         public int ChannelsCount { get; set; }
+        public int[] ChannelresourceID { get; set; }
 
         public float Volume { get; set; }
 
@@ -40,6 +42,7 @@ namespace Ryujinx.HLE.HOS.Services.Audio.AudioRendererManager
         public VoiceContext()
         {
             WaveBuffers = new WaveBuffer[4];
+            ChannelresourceID = new int[6];
         }
 
         public void SetAcquireState(bool newState)
